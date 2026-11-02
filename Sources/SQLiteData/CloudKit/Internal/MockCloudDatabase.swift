@@ -82,8 +82,6 @@
       guard ids.count < 200
       else { throw CKError(.limitExceeded) }
 
-      state.withValue { $0.fetchedRecordIDs.append(contentsOf: ids) }
-
       return state.withValue { state in
         var result: [CKRecord.ID: Result<CKRecord, any Error>] = [:]
         for recordID in ids {
@@ -103,6 +101,7 @@
               record[key] = CKAsset(fileURL: url)
             }
 
+            state.fetchedRecordIDs.append(recordID)
             return record
           }
         }
