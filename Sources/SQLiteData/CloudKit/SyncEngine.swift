@@ -1896,7 +1896,9 @@
     }
 
     private func cacheShare(_ share: CKShare) async throws {
-      let metadata = try await container.shareMetadata(for: share, shouldFetchRootRecord: false)
+      let metadata = try await withRateLimiting {
+        try await container.shareMetadata(for: share, shouldFetchRootRecord: false)
+      }
       guard let rootRecordID = metadata.hierarchicalRootRecordID
       else { return }
       try await userDatabase.write { db in
