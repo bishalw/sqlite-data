@@ -2901,7 +2901,7 @@
           │   _isDeleted: false,                                                                         │
           │   _hasLastKnownServerRecord: true,                                                           │
           │   _isShared: false,                                                                          │
-          │   userModificationTime: 1                                                                    │
+          │   userModificationTime: 0                                                                    │
           │ )                                                                                            │
           └──────────────────────────────────────────────────────────────────────────────────────────────┘
           """

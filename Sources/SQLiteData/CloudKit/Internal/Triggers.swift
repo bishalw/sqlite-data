@@ -96,7 +96,7 @@
       createTemporaryTrigger(
         "\(String.sqliteDataCloudKitSchemaName)_after_update_on_\(tableName)",
         ifNotExists: true,
-        after: .update { _, new in
+        after: .update { old, new in
           checkWritePermissions(
             alias: new,
             parentForeignKey: parentForeignKey,
@@ -110,6 +110,7 @@
             privateTables: privateTables
           )
           SyncMetadata.update(
+            old: old,
             new: new,
             parentForeignKey: parentForeignKey,
             defaultZone: defaultZone,
@@ -210,7 +211,8 @@
       }
     }
 
-    fileprivate static func update<T: PrimaryKeyedTable, Name>(
+    fileprivate static func update<T: PrimaryKeyedTable, OldName, Name>(
+      old: StructuredQueriesCore.TableAlias<T, OldName>.TableColumns,
       new: StructuredQueriesCore.TableAlias<T, Name>.TableColumns,
       parentForeignKey: ForeignKey?,
       defaultZone: CKRecordZone,
@@ -222,6 +224,18 @@
         defaultZone: defaultZone,
         privateTables: privateTables
       )
+      // NB: An update that changes no column still re-queues the record (the metadata update
+      //     below is what enqueues it), but it must not move the row's modification time: a
+      //     CKRecord saved with no field changed keeps its own time, and the two would never
+      //     agree again.
+      let isChanged = zip(
+        StructuredQueriesCore.TableAlias<T, OldName>.TableColumns.writableColumns,
+        StructuredQueriesCore.TableAlias<T, Name>.TableColumns.writableColumns
+      )
+      .map { old, new -> QueryFragment in
+        "\(old.queryFragment) IS NOT \(new.queryFragment) COLLATE BINARY"
+      }
+      .joined(separator: " OR ")
       return Self.where {
         $0.recordPrimaryKey.eq(#sql("\(new.primaryKey)"))
           && $0.recordType.eq(T.tableName)
@@ -231,7 +245,12 @@
         $0.ownerName = ownerName ?? $0.ownerName
         $0.parentRecordPrimaryKey = parentRecordPrimaryKey
         $0.parentRecordType = parentRecordType
-        $0.userModificationTime = $currentTime()
+        $0.userModificationTime = #sql(
+          """
+          CASE WHEN \(isChanged) THEN \($currentTime()) ELSE \($0.userModificationTime) END
+          """,
+          as: Int64.self
+        )
       }
     }
   }
