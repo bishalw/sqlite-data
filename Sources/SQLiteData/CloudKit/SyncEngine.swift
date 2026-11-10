@@ -756,24 +756,32 @@
     /// ``SyncEngineDelegate`` to the sync engine and implement
     /// ``SyncEngineDelegate/syncEngine(_:accountChanged:)``.
     ///
+    /// If any table's data could not be deleted, the sync engine is set up again but left
+    /// stopped, and ``DeleteLocalDataError`` is thrown: starting it would queue the rows left
+    /// behind for upload to the new account. Call this method again to retry.
+    ///
     /// > Important: It is only appropriate to call this method when the device's iCloud account
     /// > logs out or changes.
     public func deleteLocalData() async throws {
       stop()
       try tearDownSyncEngine()
-      await withErrorReporting(.sqliteDataCloudKitFailure) {
-        try await userDatabase.write { db in
-          for table in tables {
-            func open<T>(_: some SynchronizableTable<T>) {
-              withErrorReporting(.sqliteDataCloudKitFailure) {
-                try T.delete().execute(db)
-              }
+      let errors = try await userDatabase.write { db in
+        var errors: [any Error] = []
+        for table in tables {
+          func open<T>(_: some SynchronizableTable<T>) {
+            do {
+              try T.delete().execute(db)
+            } catch {
+              errors.append(error)
             }
-            open(table)
           }
-          try setUpSyncEngine(writableDB: db)
+          open(table)
         }
+        try setUpSyncEngine(writableDB: db)
+        return errors
       }
+      guard errors.isEmpty
+      else { throw DeleteLocalDataError(errors: errors) }
       try await start()
     }
 
@@ -2311,6 +2319,18 @@
 
   @available(iOS 17, macOS 14, tvOS 17, watchOS 10, *)
   extension SyncEngine {
+    /// An error thrown by ``SyncEngine/deleteLocalData()`` when the data of one or more tables
+    /// could not be deleted. The sync engine is left stopped.
+    public struct DeleteLocalDataError: LocalizedError {
+      /// The errors thrown while deleting each table's data, in the order the tables were
+      /// deleted.
+      public let errors: [any Error]
+
+      public var errorDescription: String? {
+        "Could not delete data synchronized with iCloud."
+      }
+    }
+
     package struct SchemaError: LocalizedError {
       package enum Reason {
         case cycleDetected
